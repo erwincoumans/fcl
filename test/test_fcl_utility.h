@@ -83,6 +83,8 @@ private:
 /// @brief Load an obj mesh file
 void loadOBJFile(const char* filename, std::vector<Vec3f>& points, std::vector<Triangle>& triangles);
 
+void saveOBJFile(const char* filename, std::vector<Vec3f>& points, std::vector<Triangle>& triangles);
+
 /// @brief Generate one random transform whose translation is constrained by extents and rotation without constraints. 
 /// The translation is (x, y, z), and extents[0] <= x <= extents[3], extents[1] <= y <= extents[4], extents[2] <= z <= extents[5]
 void generateRandomTransform(FCL_REAL extents[6], Transform3f& transform);
@@ -145,6 +147,24 @@ struct DistanceData
 
 };
 
+/// @brief Continuous collision data stores the continuous collision request and result given the continuous collision algorithm.
+struct ContinuousCollisionData
+{
+  ContinuousCollisionData()
+  {
+    done = false;
+  }
+
+  /// @brief Continuous collision request
+  ContinuousCollisionRequest request;
+
+  /// @brief Continuous collision result
+  ContinuousCollisionResult result;
+
+  /// @brief Whether the continuous collision iteration can stop
+  bool done;
+};
+
 
 
 /// @brief Default collision callback for two objects o1 and o2 in broad phase. return value means whether the broad phase can stop now.
@@ -152,6 +172,14 @@ bool defaultCollisionFunction(CollisionObject* o1, CollisionObject* o2, void* cd
 
 /// @brief Default distance callback for two objects o1 and o2 in broad phase. return value means whether the broad phase can stop now. also return dist, i.e. the bmin distance till now
 bool defaultDistanceFunction(CollisionObject* o1, CollisionObject* o2, void* cdata, FCL_REAL& dist);
+
+
+
+
+
+bool defaultContinuousCollisionFunction(ContinuousCollisionObject* o1, ContinuousCollisionObject* o2, void* cdata_);
+
+bool defaultContinuousDistanceFunction(ContinuousCollisionObject* o1, ContinuousCollisionObject* o2, void* cdata_, FCL_REAL& dist);
 
 
 }

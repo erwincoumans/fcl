@@ -37,5 +37,5 @@
 #ifndef FCL_TEST_RESOURCES_CONFIG_
 #define FCL_TEST_RESOURCES_CONFIG_
 
-#define TEST_RESOURCES_DIR "/Users/erwincoumans/develop/fcl/test/fcl_resources"
+#define TEST_RESOURCES_DIR "C:\\develop\\fcl_erwin\\test\\fcl_resources"
 #endif

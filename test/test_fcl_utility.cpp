@@ -1,8 +1,10 @@
 #include "test_fcl_utility.h"
 #include "fcl/collision.h"
+#include "fcl/continuous_collision.h"
 #include "fcl/distance.h"
 #include <cstdio>
 #include <cstddef>
+#include <fstream>
 
 namespace fcl
 {
@@ -184,6 +186,29 @@ void loadOBJFile(const char* filename, std::vector<Vec3f>& points, std::vector<T
 }
 
 
+void saveOBJFile(const char* filename, std::vector<Vec3f>& points, std::vector<Triangle>& triangles)
+{
+  std::ofstream os(filename);
+  if(!os)
+  {
+    std::cerr << "file not exist" << std::endl;
+    return;
+  }
+
+  for(std::size_t i = 0; i < points.size(); ++i)
+  {
+    os << "v " << points[i][0] << " " << points[i][1] << " " << points[i][2] << std::endl;
+  }
+
+  for(std::size_t i = 0; i < triangles.size(); ++i)
+  {
+    os << "f " << triangles[i][0] + 1 << " " << triangles[i][1] + 1 << " " << triangles[i][2] + 1 << std::endl;
+  }
+
+  os.close();
+}
+
+
 void eulerToMatrix(FCL_REAL a, FCL_REAL b, FCL_REAL c, Matrix3f& R)
 {
   FCL_REAL c1 = cos(a);
@@ -357,5 +382,22 @@ bool defaultDistanceFunction(CollisionObject* o1, CollisionObject* o2, void* cda
   return cdata->done;
 }
 
+bool defaultContinuousCollisionFunction(ContinuousCollisionObject* o1, ContinuousCollisionObject* o2, void* cdata_)
+{
+  ContinuousCollisionData* cdata = static_cast<ContinuousCollisionData*>(cdata_);
+  const ContinuousCollisionRequest& request = cdata->request;
+  ContinuousCollisionResult& result = cdata->result;
+
+  if(cdata->done) return true;
+
+  collide(o1, o2, request, result);
+
+  return cdata->done;
+}
+
+bool defaultContinuousDistanceFunction(ContinuousCollisionObject* o1, ContinuousCollisionObject* o2, void* cdata_, FCL_REAL& dist)
+{
+  return true;
+}
 
 }

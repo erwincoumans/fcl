@@ -70,7 +70,7 @@ std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1,
 {
   const NarrowPhaseSolver* nsolver = nsolver_;
   if(!nsolver_)
-    nsolver = new NarrowPhaseSolver();
+    nsolver = new NarrowPhaseSolver();  
 
   const CollisionFunctionMatrix<NarrowPhaseSolver>& looktable = getCollisionFunctionLookTable<NarrowPhaseSolver>();
 
@@ -87,7 +87,7 @@ std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1,
     NODE_TYPE node_type1 = o1->getNodeType();
     NODE_TYPE node_type2 = o2->getNodeType();
   
-    if(object_type1 == OT_GEOM & object_type2 == OT_BVH)
+    if(object_type1 == OT_GEOM && object_type2 == OT_BVH)
     {  
       if(!looktable.collision_matrix[node_type2][node_type1])
       {
@@ -115,27 +115,47 @@ std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1,
   return res;
 }
 
-template std::size_t collide(const CollisionObject* o1, const CollisionObject* o2, const GJKSolver_libccd* nsolver, const CollisionRequest& request, CollisionResult& result);
-template std::size_t collide(const CollisionObject* o1, const CollisionObject* o2, const GJKSolver_indep* nsolver, const CollisionRequest& request, CollisionResult& result);
-template std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1, const CollisionGeometry* o2, const Transform3f& tf2, const GJKSolver_libccd* nsolver, const CollisionRequest& request, CollisionResult& result);
-template std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1, const CollisionGeometry* o2, const Transform3f& tf2, const GJKSolver_indep* nsolver, const CollisionRequest& request, CollisionResult& result);
-
-
 std::size_t collide(const CollisionObject* o1, const CollisionObject* o2,
                     const CollisionRequest& request, CollisionResult& result)
 {
-  GJKSolver_libccd solver;
-  return collide<GJKSolver_libccd>(o1, o2, &solver, request, result);
+  switch(request.gjk_solver_type)
+  {
+  case GST_LIBCCD:
+    {
+      GJKSolver_libccd solver;
+      return collide<GJKSolver_libccd>(o1, o2, &solver, request, result);
+    }
+  case GST_INDEP:
+    {
+      GJKSolver_indep solver;
+      return collide<GJKSolver_indep>(o1, o2, &solver, request, result);
+    }
+  default:
+    return -1; // error
+  }
 }
 
 std::size_t collide(const CollisionGeometry* o1, const Transform3f& tf1,
                     const CollisionGeometry* o2, const Transform3f& tf2,
                     const CollisionRequest& request, CollisionResult& result)
 {
-  GJKSolver_libccd solver;
-  return collide<GJKSolver_libccd>(o1, tf1, o2, tf2, &solver, request, result);
-  // GJKSolver_indep solver;
-  // return collide<GJKSolver_indep>(o1, tf1, o2, tf2, &solver, request, result);
+  switch(request.gjk_solver_type)
+  {
+  case GST_LIBCCD:
+    {
+      GJKSolver_libccd solver;
+      return collide<GJKSolver_libccd>(o1, tf1, o2, tf2, &solver, request, result);
+    }
+  case GST_INDEP:
+    {
+      GJKSolver_indep solver;
+      return collide<GJKSolver_indep>(o1, tf1, o2, tf2, &solver, request, result);
+    }
+  default:
+    std::cerr << "Warning! Invalid GJK solver" << std::endl;
+    return -1; // error
+  }
 }
 
 }
+

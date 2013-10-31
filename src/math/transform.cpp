@@ -36,6 +36,7 @@
 
 
 #include "fcl/math/transform.h"
+#include <boost/math/constants/constants.hpp>
 
 namespace fcl
 {
@@ -327,6 +328,37 @@ Quaternion3f inverse(const Quaternion3f& q)
   return res.inverse();
 }
 
+void Quaternion3f::fromEuler(FCL_REAL a, FCL_REAL b, FCL_REAL c)
+{
+  Matrix3f R;
+  R.setEulerYPR(a, b, c);
+
+  fromRotation(R);
+}
+
+void Quaternion3f::toEuler(FCL_REAL& a, FCL_REAL& b, FCL_REAL& c) const
+{
+  Matrix3f R;
+  toRotation(R);
+  a = atan2(R(1, 0), R(0, 0));
+  b = asin(-R(2, 0));
+  c = atan2(R(2, 1), R(2, 2));
+
+  if(b == boost::math::constants::pi<double>() * 0.5)
+  {
+    if(a > 0)
+      a -= boost::math::constants::pi<double>();
+    else 
+      a += boost::math::constants::pi<double>();
+
+    if(c > 0)
+      c -= boost::math::constants::pi<double>();
+    else
+      c += boost::math::constants::pi<double>();
+  }
+}
+
+
 Vec3f Quaternion3f::getColumn(std::size_t i) const
 {
   switch(i)
@@ -394,6 +426,14 @@ void relativeTransform(const Transform3f& tf1, const Transform3f& tf2,
 {
   const Quaternion3f& q1_inv = fcl::conj(tf1.getQuatRotation());
   tf = Transform3f(q1_inv * tf2.getQuatRotation(), q1_inv.transform(tf2.getTranslation() - tf1.getTranslation()));
+}
+
+void relativeTransform2(const Transform3f& tf1, const Transform3f& tf2,
+                       Transform3f& tf)
+{
+  const Quaternion3f& q1inv = fcl::conj(tf1.getQuatRotation());
+  const Quaternion3f& q2_q1inv = tf2.getQuatRotation() * q1inv;
+  tf = Transform3f(q2_q1inv, tf2.getTranslation() - q2_q1inv.transform(tf1.getTranslation()));
 }
 
 

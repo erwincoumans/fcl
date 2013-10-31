@@ -46,15 +46,22 @@
 namespace fcl
 {
 
-template<typename BV>
-int conservativeAdvancement(const CollisionGeometry* o1,
-                            MotionBase<BV>* motion1,
-                            const CollisionGeometry* o2,
-                            MotionBase<BV>* motion2,
-                            const CollisionRequest& request,
-                            CollisionResult& result,
-                            FCL_REAL& toc);
+template<typename NarrowPhaseSolver>
+struct ConservativeAdvancementFunctionMatrix
+{
+  typedef FCL_REAL (*ConservativeAdvancementFunc)(const CollisionGeometry* o1, const MotionBase* motion1, const CollisionGeometry* o2, const MotionBase* motion2, const NarrowPhaseSolver* nsolver, const ContinuousCollisionRequest& request, ContinuousCollisionResult& result);
+
+  ConservativeAdvancementFunc conservative_advancement_matrix[NODE_COUNT][NODE_COUNT];
+
+  ConservativeAdvancementFunctionMatrix();
+};
+
+
 
 }
 
 #endif
+
+
+
+

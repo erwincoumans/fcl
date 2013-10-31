@@ -40,35 +40,150 @@
 
 
 #include "fcl/math/transform.h"
+#include "fcl/ccd/taylor_matrix.h"
+#include "fcl/ccd/taylor_vector.h"
 #include "fcl/BV/RSS.h"
 
 namespace fcl
 {
 
+class MotionBase;
+
+class SplineMotion;
+class ScrewMotion;
+class InterpMotion;
+class TranslationMotion;
+
+/// @brief Compute the motion bound for a bounding volume, given the closest direction n between two query objects
+class BVMotionBoundVisitor
+{
+public:
+  virtual FCL_REAL visit(const MotionBase& motion) const = 0;
+  virtual FCL_REAL visit(const SplineMotion& motion) const = 0;
+  virtual FCL_REAL visit(const ScrewMotion& motion) const = 0;
+  virtual FCL_REAL visit(const InterpMotion& motion) const = 0;
+  virtual FCL_REAL visit(const TranslationMotion& motion) const = 0;
+};
+
 template<typename BV>
+class TBVMotionBoundVisitor : public BVMotionBoundVisitor
+{
+public:
+  TBVMotionBoundVisitor(const BV& bv_, const Vec3f& n_) : bv(bv_), n(n_) {}
+
+  virtual FCL_REAL visit(const MotionBase& motion) const { return 0; }
+  virtual FCL_REAL visit(const SplineMotion& motion) const { return 0; }
+  virtual FCL_REAL visit(const ScrewMotion& motion) const { return 0; }
+  virtual FCL_REAL visit(const InterpMotion& motion) const { return 0; }
+  virtual FCL_REAL visit(const TranslationMotion& motion) const { return 0; }
+
+protected:
+  BV bv;
+  Vec3f n;
+};
+
+template<>
+FCL_REAL TBVMotionBoundVisitor<RSS>::visit(const SplineMotion& motion) const;
+
+template<>
+FCL_REAL TBVMotionBoundVisitor<RSS>::visit(const ScrewMotion& motion) const;
+
+template<>
+FCL_REAL TBVMotionBoundVisitor<RSS>::visit(const InterpMotion& motion) const;
+
+template<>
+FCL_REAL TBVMotionBoundVisitor<RSS>::visit(const TranslationMotion& motion) const;
+
+
+class TriangleMotionBoundVisitor
+{
+public:
+  TriangleMotionBoundVisitor(const Vec3f& a_, const Vec3f& b_, const Vec3f& c_, const Vec3f& n_) :
+    a(a_), b(b_), c(c_), n(n_) {}
+
+  virtual FCL_REAL visit(const MotionBase& motion) const { return 0; }
+  virtual FCL_REAL visit(const SplineMotion& motion) const;
+  virtual FCL_REAL visit(const ScrewMotion& motion) const;
+  virtual FCL_REAL visit(const InterpMotion& motion) const;
+  virtual FCL_REAL visit(const TranslationMotion& motion) const;
+
+protected:
+  Vec3f a, b, c, n;
+};
+
+
+
 class MotionBase
 {
 public:
+  MotionBase() : time_interval_(boost::shared_ptr<TimeInterval>(new TimeInterval(0, 1)))
+  {
+  }
+  
   virtual ~MotionBase() {}
 
   /** \brief Integrate the motion from 0 to dt */
-  virtual bool integrate(double dt) = 0;
+  virtual bool integrate(double dt) const = 0;
 
   /** \brief Compute the motion bound for a bounding volume, given the closest direction n between two query objects */
-  virtual FCL_REAL computeMotionBound(const BV& bv, const Vec3f& n) const = 0;
+  virtual FCL_REAL computeMotionBound(const BVMotionBoundVisitor& mb_visitor) const = 0;
 
   /** \brief Compute the motion bound for a triangle, given the closest direction n between two query objects */
-  virtual FCL_REAL computeMotionBound(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& n) const = 0;
+  virtual FCL_REAL computeMotionBound(const TriangleMotionBoundVisitor& mb_visitor) const = 0;
 
   /** \brief Get the rotation and translation in current step */
-  virtual void getCurrentTransform(Matrix3f& R, Vec3f& T) const = 0;
+  void getCurrentTransform(Matrix3f& R, Vec3f& T) const
+  {
+    Transform3f tf;
+    getCurrentTransform(tf);
+    R = tf.getRotation();
+    T = tf.getTranslation();
+  }
 
-  virtual void getCurrentRotation(Matrix3f& R) const = 0;
+  void getCurrentTransform(Quaternion3f& Q, Vec3f& T) const
+  {
+    Transform3f tf;
+    getCurrentTransform(tf);
+    Q = tf.getQuatRotation();
+    T = tf.getTranslation();
+  }
 
-  virtual void getCurrentTranslation(Vec3f& T) const = 0;
+  void getCurrentRotation(Matrix3f& R) const
+  {
+    Transform3f tf;
+    getCurrentTransform(tf);
+    R = tf.getRotation();
+  }
+
+  void getCurrentRotation(Quaternion3f& Q) const
+  {
+    Transform3f tf;
+    getCurrentTransform(tf);
+    Q = tf.getQuatRotation();
+  }
+
+  void getCurrentTranslation(Vec3f& T) const
+  {
+    Transform3f tf;
+    getCurrentTransform(tf);
+    T = tf.getTranslation();
+  }
 
   virtual void getCurrentTransform(Transform3f& tf) const = 0;
+
+  virtual void getTaylorModel(TMatrix3& tm, TVector3& tv) const = 0;
+
+  const boost::shared_ptr<TimeInterval>& getTimeInterval() const
+  {
+    return time_interval_;
+  }
+protected:
+
+  boost::shared_ptr<TimeInterval> time_interval_;
+  
 };
+
+typedef boost::shared_ptr<MotionBase> MotionBasePtr;
 
 
 }

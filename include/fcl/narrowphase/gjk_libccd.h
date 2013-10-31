@@ -68,7 +68,7 @@ public:
   /// @brief Get GJK object from a shape
   /// Notice that only local transformation is applied.
   /// Gloal transformation are considered later
-  static void* createGJKObject(const T& s, const Transform3f& tf) { return NULL; }
+  static void* createGJKObject(const T& /* s */, const Transform3f& /*tf*/) { return NULL; }
 
   /// @brief Delete GJK object
   static void deleteGJKObject(void* o) {}
@@ -160,7 +160,7 @@ bool GJKCollide(void* obj1, ccd_support_fn supp1, ccd_center_fn cen1,
 bool GJKDistance(void* obj1, ccd_support_fn supp1,
                  void* obj2, ccd_support_fn supp2,
                  unsigned int max_iterations, FCL_REAL tolerance,
-                 FCL_REAL* dist);
+                 FCL_REAL* dist, Vec3f* p1, Vec3f* p2);
 
 
 } // details

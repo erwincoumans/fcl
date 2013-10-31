@@ -36,6 +36,7 @@
 
 #include "fcl/narrowphase/narrowphase.h"
 #include "fcl/shape/geometric_shapes_utility.h"
+#include "fcl/intersect.h"
 #include <boost/math/constants/constants.hpp>
 #include <vector>
 
@@ -44,6 +45,99 @@ namespace fcl
 
 namespace details
 {
+
+// Compute the point on a line segment that is the closest point on the
+// segment to to another point. The code is inspired by the explanation
+// given by Dan Sunday's page:
+//   http://geomalgorithms.com/a02-_lines.html
+static inline void lineSegmentPointClosestToPoint (const Vec3f &p, const Vec3f &s1, const Vec3f &s2, Vec3f &sp) {
+  Vec3f v = s2 - s1;
+  Vec3f w = p - s1;
+
+  FCL_REAL c1 = w.dot(v);
+  FCL_REAL c2 = v.dot(v);
+
+  if (c1 <= 0) {
+    sp = s1;
+  } else if (c2 <= c1) {
+    sp = s2;
+  } else {
+    FCL_REAL b = c1/c2;
+    Vec3f Pb = s1 + v * b;
+    sp = Pb;
+  }
+}
+
+bool sphereCapsuleIntersect(const Sphere& s1, const Transform3f& tf1, 
+                            const Capsule& s2, const Transform3f& tf2,
+                            Vec3f* contact_points, FCL_REAL* penetration_depth, Vec3f* normal_)
+{
+  Transform3f tf2_inv (tf2);
+  tf2_inv.inverse();
+
+  Vec3f pos1 (0., 0., 0.5 * s2.lz);
+  Vec3f pos2 (0., 0., -0.5 * s2.lz);
+  Vec3f s_c = tf2_inv.transform(tf1.transform(Vec3f()));
+
+  Vec3f segment_point;
+
+  lineSegmentPointClosestToPoint (s_c, pos1, pos2, segment_point);
+  Vec3f diff = s_c - segment_point;
+
+  FCL_REAL distance = diff.length() - s1.radius - s2.radius;
+
+  if (distance > 0)
+    return false;
+
+  Vec3f normal = diff.normalize() * - FCL_REAL(1);
+
+  if (distance < 0 && penetration_depth)
+    *penetration_depth = -distance;
+
+  if (normal_)
+    *normal_ = tf2.getQuatRotation().transform(normal);
+
+  if (contact_points) {
+    *contact_points = tf2.transform(segment_point + normal * distance);
+  }
+
+  return true;
+}
+
+bool sphereCapsuleDistance(const Sphere& s1, const Transform3f& tf1, 
+                           const Capsule& s2, const Transform3f& tf2,
+                           FCL_REAL* dist, Vec3f* p1, Vec3f* p2)
+{
+  Transform3f tf2_inv(tf2);
+  tf2_inv.inverse();
+
+  Vec3f pos1(0., 0., 0.5 * s2.lz);
+  Vec3f pos2(0., 0., -0.5 * s2.lz);
+  Vec3f s_c = tf2_inv.transform(tf1.transform(Vec3f()));
+
+  Vec3f segment_point;
+
+  lineSegmentPointClosestToPoint (s_c, pos1, pos2, segment_point);
+  Vec3f diff = s_c - segment_point;
+
+  FCL_REAL distance = diff.length() - s1.radius - s2.radius;
+
+  if(distance <= 0)
+    return false;
+
+  if(dist) *dist = distance;
+
+  if(p1 || p2) diff.normalize();
+  if(p1)
+  {
+    *p1 = s_c - diff * s1.radius;
+    *p1 = inverse(tf1).transform(tf2.transform(*p1));
+  }
+
+  if(p2) *p2 = segment_point + diff * s1.radius;
+
+  return true;
+}
 
 bool sphereSphereIntersect(const Sphere& s1, const Transform3f& tf1, 
                            const Sphere& s2, const Transform3f& tf2,
@@ -65,7 +159,7 @@ bool sphereSphereIntersect(const Sphere& s1, const Transform3f& tf1,
   }
 
   if(contact_points)
-    *contact_points = tf1.transform(Vec3f()) + diff * 0.5;
+    *contact_points = tf1.transform(Vec3f()) - diff * s1.radius / (s1.radius + s2.radius);
   
   return true;
 }
@@ -73,17 +167,21 @@ bool sphereSphereIntersect(const Sphere& s1, const Transform3f& tf1,
 
 bool sphereSphereDistance(const Sphere& s1, const Transform3f& tf1,
                           const Sphere& s2, const Transform3f& tf2,
-                          FCL_REAL* dist)
+                          FCL_REAL* dist, Vec3f* p1, Vec3f* p2)
 {
-  Vec3f diff = tf1.transform(Vec3f()) - tf2.transform(Vec3f());
+  Vec3f o1 = tf1.getTranslation();
+  Vec3f o2 = tf2.getTranslation();
+  Vec3f diff = o1 - o2;
   FCL_REAL len = diff.length();
   if(len > s1.radius + s2.radius)
   {
-    *dist = len - (s1.radius + s2.radius);
+    if(dist) *dist = len - (s1.radius + s2.radius);
+    if(p1) *p1 = inverse(tf1).transform(o1 - diff * (s1.radius / len));
+    if(p2) *p2 = inverse(tf2).transform(o2 + diff * (s2.radius / len));
     return true;
   }
 
-  *dist = -1;
+  if(dist) *dist = -1;
   return false;
 }
 
@@ -115,7 +213,7 @@ FCL_REAL segmentSqrDistance(const Vec3f& from, const Vec3f& to,const Vec3f& p, V
   return diff.dot(diff);	
 }
 
-/** \brief Whether a point's projection is in a triangle */
+/// @brief Whether a point's projection is in a triangle
 bool projectInTriangle(const Vec3f& p1, const Vec3f& p2, const Vec3f& p3, const Vec3f& normal, const Vec3f& p)
 {
   Vec3f edge1(p2 - p1);
@@ -213,7 +311,6 @@ bool sphereTriangleIntersect(const Sphere& s, const Transform3f& tf,
       }
       else
       {
-        FCL_REAL distance = 0;
         if(normal_) *normal_ = normal;
         if(contact_points) *contact_points = contact_point;
         if(penetration_depth) *penetration_depth = -radius;
@@ -225,6 +322,7 @@ bool sphereTriangleIntersect(const Sphere& s, const Transform3f& tf,
 
   return false;
 }
+
 
 bool sphereTriangleDistance(const Sphere& sp, const Transform3f& tf,
                             const Vec3f& P1, const Vec3f& P2, const Vec3f& P3,
@@ -457,18 +555,58 @@ bool sphereTriangleDistance(const Sphere& sp, const Transform3f& tf,
 
   if(sqr_dist > radius * radius)
   {
-    *dist = std::sqrt(sqr_dist) - radius;
+    if(dist) *dist = std::sqrt(sqr_dist) - radius;
     return true;
   }
   else
   {
-    *dist = -1;
+    if(dist) *dist = -1;
     return false;
   }
 }
 
 
+bool sphereTriangleDistance(const Sphere& sp, const Transform3f& tf,
+                            const Vec3f& P1, const Vec3f& P2, const Vec3f& P3,
+                            FCL_REAL* dist, Vec3f* p1, Vec3f* p2)
+{
+  if(p1 || p2)
+  {
+    Vec3f o = tf.getTranslation();
+    Project::ProjectResult result;
+    result = Project::projectTriangle(P1, P2, P3, o);
+    if(result.sqr_distance > sp.radius * sp.radius)
+    {
+      if(dist) *dist = std::sqrt(result.sqr_distance);
+      Vec3f project_p = P1 * result.parameterization[0] + P2 * result.parameterization[1] + P3 * result.parameterization[2];
+      Vec3f dir = o - project_p;
+      dir.normalize();
+      if(p1) { *p1 = o - dir * sp.radius; *p1 = inverse(tf).transform(*p1); }
+      if(p2) *p2 = project_p;
+      return true;
+    }
+    else
+      return false;
+  }
+  else
+  {
+    return sphereTriangleDistance(sp, tf, P1, P2, P3, dist);
+  }
+}
 
+
+bool sphereTriangleDistance(const Sphere& sp, const Transform3f& tf1,
+                            const Vec3f& P1, const Vec3f& P2, const Vec3f& P3, const Transform3f& tf2,
+                            FCL_REAL* dist, Vec3f* p1, Vec3f* p2)
+{
+  bool res = details::sphereTriangleDistance(sp, tf1, tf2.transform(P1), tf2.transform(P2), tf2.transform(P2), dist, p1, p2);
+  if(p2) *p2 = inverse(tf2).transform(*p2);
+
+  return res;
+}
+
+
+  
 struct ContactPoint
 {
   Vec3f normal;
@@ -526,36 +664,36 @@ static int intersectRectQuad2(FCL_REAL h[2], FCL_REAL p[8], FCL_REAL ret[16])
       nr = 0;
       for(int i = nq; i > 0; --i) 
       {
-	// go through all points in q and all lines between adjacent points
-	if(sign * pq[dir] < h[dir]) 
+        // go through all points in q and all lines between adjacent points
+        if(sign * pq[dir] < h[dir]) 
         {
-	  // this point is inside the chopping line
-	  pr[0] = pq[0];
-	  pr[1] = pq[1];
-	  pr += 2;
-	  nr++;
-	  if(nr & 8) 
+          // this point is inside the chopping line
+          pr[0] = pq[0];
+          pr[1] = pq[1];
+          pr += 2;
+          nr++;
+          if(nr & 8) 
           {
-	    q = r;
-	    goto done;
-	  }
-	}
-	FCL_REAL* nextq = (i > 1) ? pq+2 : q;
-	if((sign*pq[dir] < h[dir]) ^ (sign*nextq[dir] < h[dir])) 
+            q = r;
+            goto done;
+          }
+        }
+        FCL_REAL* nextq = (i > 1) ? pq+2 : q;
+        if((sign*pq[dir] < h[dir]) ^ (sign*nextq[dir] < h[dir])) 
         {
-	  // this line crosses the chopping line
-	  pr[1-dir] = pq[1-dir] + (nextq[1-dir]-pq[1-dir]) /
-	    (nextq[dir]-pq[dir]) * (sign*h[dir]-pq[dir]);
-	  pr[dir] = sign*h[dir];
-	  pr += 2;
-	  nr++;
-	  if(nr & 8) 
+          // this line crosses the chopping line
+          pr[1-dir] = pq[1-dir] + (nextq[1-dir]-pq[1-dir]) /
+            (nextq[dir]-pq[dir]) * (sign*h[dir]-pq[dir]);
+          pr[dir] = sign*h[dir];
+          pr += 2;
+          nr++;
+          if(nr & 8) 
           {
-	    q = r;
-	    goto done;
-	  }
-	}
-	pq += 2;
+            q = r;
+            goto done;
+          }
+        }
+        pq += 2;
       }
       q = r;
       r = (q == ret) ? buffer : ret;
@@ -634,13 +772,13 @@ static inline void cullPoints2(int n, FCL_REAL p[], int m, int i0, int iret[])
     {
       if(avail[i]) 
       {
-	diff = std::abs(A[i]-a);
-	if(diff > pi) diff = 2*pi - diff;
-	if(diff < maxdiff) 
+        diff = std::abs(A[i]-a);
+        if(diff > pi) diff = 2*pi - diff;
+        if(diff < maxdiff) 
         {
-	  maxdiff = diff;
-	  *iret = i;
-	}
+          maxdiff = diff;
+          *iret = i;
+        }
       }
     }
     avail[*iret] = 0;
@@ -1018,7 +1156,7 @@ int boxBox2(const Vec3f& side1, const Matrix3f& R1, const Vec3f& T1,
     normal2 = -normal;
 
   nr = Rb->transposeTimes(normal2);
-  anr = abs(anr);
+  anr = abs(nr);
 
   // find the largest compontent of anr: this corresponds to the normal
   // for the indident face. the other axis numbers of the indicent face
@@ -1184,8 +1322,8 @@ int boxBox2(const Vec3f& side1, const Matrix3f& R1, const Vec3f& T1,
     {
       if(dep[i] > maxdepth) 
       {
-	maxdepth = dep[i];
-	i1 = i;
+        maxdepth = dep[i];
+        i1 = i;
       }
     }
 
@@ -1217,10 +1355,10 @@ bool boxBoxIntersect(const Box& s1, const Transform3f& tf1,
   int return_code; 
   Vec3f normal;
   FCL_REAL depth;
-  int cnum = boxBox2(s1.side, tf1.getRotation(), tf1.getTranslation(),
-                     s2.side, tf2.getRotation(), tf2.getTranslation(),
-                     normal, &depth, &return_code,
-                     4, contacts);
+  /* int cnum = */ boxBox2(s1.side, tf1.getRotation(), tf1.getTranslation(),
+                           s2.side, tf2.getRotation(), tf2.getTranslation(),
+                           normal, &depth, &return_code,
+                           4, contacts);
 
   if(normal_) *normal_ = normal;
   if(penetration_depth_) *penetration_depth_ = depth;
@@ -1524,7 +1662,7 @@ bool convexHalfspaceIntersect(const Convex& s1, const Transform3f& tf1,
   Vec3f v;
   FCL_REAL depth = std::numeric_limits<FCL_REAL>::max();
 
-  for(std::size_t i = 0; i < s1.num_points; ++i)
+  for(int i = 0; i < s1.num_points; ++i)
   {
     Vec3f p = tf1.transform(s1.points[i]);
     
@@ -2112,7 +2250,7 @@ bool conePlaneIntersect(const Cone& s1, const Transform3f& tf1,
         Vec3f q;
             
         FCL_REAL p_d[2];
-        FCL_REAL q_d;
+        FCL_REAL q_d(0);
 
         if(n_positive == 2)
         {            
@@ -2153,7 +2291,7 @@ bool convexPlaneIntersect(const Convex& s1, const Transform3f& tf1,
   Vec3f v_min, v_max;
   FCL_REAL d_min = std::numeric_limits<FCL_REAL>::max(), d_max = -std::numeric_limits<FCL_REAL>::max();
 
-  for(std::size_t i = 0; i < s1.num_points; ++i)
+  for(int i = 0; i < s1.num_points; ++i)
   {
     Vec3f p = tf1.transform(s1.points[i]);
     
@@ -2231,7 +2369,7 @@ bool planeTriangleIntersect(const Plane& s1, const Transform3f& tf1,
       Vec3f q;
       
       FCL_REAL p_d[2];
-      FCL_REAL q_d;
+      FCL_REAL q_d(0);
       
       if(n_positive == 2)
       {
@@ -2291,6 +2429,13 @@ bool planeIntersect(const Plane& s1, const Transform3f& tf1,
 
 } // details
 
+template<>
+bool GJKSolver_libccd::shapeIntersect<Sphere, Capsule>(const Sphere &s1, const Transform3f& tf1,
+                                                       const Capsule &s2, const Transform3f& tf2,
+                                                       Vec3f* contact_points, FCL_REAL* penetration_depth, Vec3f* normal) const
+{
+  return details::sphereCapsuleIntersect (s1, tf1, s2, tf2, contact_points, penetration_depth, normal);
+}
 
 template<>
 bool GJKSolver_libccd::shapeIntersect<Sphere, Sphere>(const Sphere& s1, const Transform3f& tf1,
@@ -2466,34 +2611,48 @@ bool GJKSolver_libccd::shapeTriangleIntersect(const Plane& s, const Transform3f&
 
 
 template<>
+bool GJKSolver_libccd::shapeDistance<Sphere, Capsule>(const Sphere& s1, const Transform3f& tf1,
+                                                      const Capsule& s2, const Transform3f& tf2,
+                                                      FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
+{
+  return details::sphereCapsuleDistance(s1, tf1, s2, tf2, dist, p1, p2);
+}
+
+template<>
 bool GJKSolver_libccd::shapeDistance<Sphere, Sphere>(const Sphere& s1, const Transform3f& tf1,
                                                      const Sphere& s2, const Transform3f& tf2,
-                                                     FCL_REAL* dist) const
+                                                     FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereSphereDistance(s1, tf1, s2, tf2, dist);
+  return details::sphereSphereDistance(s1, tf1, s2, tf2, dist, p1, p2);
 }
 
 template<>
 bool GJKSolver_libccd::shapeTriangleDistance<Sphere>(const Sphere& s, const Transform3f& tf,
                                                      const Vec3f& P1, const Vec3f& P2, const Vec3f& P3, 
-                                                     FCL_REAL* dist) const
+                                                     FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereTriangleDistance(s, tf, P1, P2, P3, dist);
+  return details::sphereTriangleDistance(s, tf, P1, P2, P3, dist, p1, p2);
 }
 
 template<> 
 bool GJKSolver_libccd::shapeTriangleDistance<Sphere>(const Sphere& s, const Transform3f& tf1, 
                                                      const Vec3f& P1, const Vec3f& P2, const Vec3f& P3, const Transform3f& tf2,
-                                                     FCL_REAL* dist) const
+                                                     FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereTriangleDistance(s, tf1, tf2.transform(P1), tf2.transform(P2), tf2.transform(P3), dist);
+  return details::sphereTriangleDistance(s, tf1, P1, P2, P3, tf2, dist, p1, p2);
 }
 
 
 
 
 
-
+template<>
+bool GJKSolver_indep::shapeIntersect<Sphere, Capsule>(const Sphere &s1, const Transform3f& tf1,
+                                                      const Capsule &s2, const Transform3f& tf2,
+                                                      Vec3f* contact_points, FCL_REAL* penetration_depth, Vec3f* normal) const
+{
+  return details::sphereCapsuleIntersect (s1, tf1, s2, tf2, contact_points, penetration_depth, normal);
+}
 
 template<>
 bool GJKSolver_indep::shapeIntersect<Sphere, Sphere>(const Sphere& s1, const Transform3f& tf1,
@@ -2667,27 +2826,35 @@ bool GJKSolver_indep::shapeTriangleIntersect(const Plane& s, const Transform3f& 
 
 
 template<>
+bool GJKSolver_indep::shapeDistance<Sphere, Capsule>(const Sphere& s1, const Transform3f& tf1,
+                                                     const Capsule& s2, const Transform3f& tf2,
+                                                     FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
+{
+  return details::sphereCapsuleDistance(s1, tf1, s2, tf2, dist, p1, p2);
+}
+
+template<>
 bool GJKSolver_indep::shapeDistance<Sphere, Sphere>(const Sphere& s1, const Transform3f& tf1,
                                                     const Sphere& s2, const Transform3f& tf2,
-                                                    FCL_REAL* dist) const
+                                                    FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereSphereDistance(s1, tf1, s2, tf2, dist);
+  return details::sphereSphereDistance(s1, tf1, s2, tf2, dist, p1, p2);
 }
 
 template<>
 bool GJKSolver_indep::shapeTriangleDistance<Sphere>(const Sphere& s, const Transform3f& tf,
                                                     const Vec3f& P1, const Vec3f& P2, const Vec3f& P3, 
-                                                    FCL_REAL* dist) const
+                                                    FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereTriangleDistance(s, tf, P1, P2, P3, dist);
+  return details::sphereTriangleDistance(s, tf, P1, P2, P3, dist, p1, p2);
 }
 
 template<> 
 bool GJKSolver_indep::shapeTriangleDistance<Sphere>(const Sphere& s, const Transform3f& tf1, 
                                                     const Vec3f& P1, const Vec3f& P2, const Vec3f& P3, const Transform3f& tf2,
-                                                    FCL_REAL* dist) const
+                                                    FCL_REAL* dist, Vec3f* p1, Vec3f* p2) const
 {
-  return details::sphereTriangleDistance(s, tf1, tf2.transform(P1), tf2.transform(P2), tf2.transform(P3), dist);
+  return details::sphereTriangleDistance(s, tf1, P1, P2, P3, tf2, dist, p1, p2);
 }
 
 

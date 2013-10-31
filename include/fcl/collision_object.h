@@ -40,6 +40,7 @@
 
 #include "fcl/BV/AABB.h"
 #include "fcl/math/transform.h"
+#include "fcl/ccd/motion_base.h"
 #include <boost/shared_ptr.hpp>
 
 namespace fcl
@@ -114,6 +115,34 @@ public:
 
   /// @brief threshold for free (<= is free)
   FCL_REAL threshold_free;
+
+  /// @brief compute center of mass
+  virtual Vec3f computeCOM() const { return Vec3f(); }
+
+  /// @brief compute the inertia matrix, related to the origin
+  virtual Matrix3f computeMomentofInertia() const { return Matrix3f(); }
+
+  /// @brief compute the volume
+  virtual FCL_REAL computeVolume() const { return 0; }
+
+  /// @brief compute the inertia matrix, related to the com
+  virtual Matrix3f computeMomentofInertiaRelatedToCOM() const
+  {
+    Matrix3f C = computeMomentofInertia();
+    Vec3f com = computeCOM();
+    FCL_REAL V = computeVolume();
+
+    return Matrix3f(C(0, 0) - V * (com[1] * com[1] + com[2] * com[2]),
+                    C(0, 1) + V * com[0] * com[1],
+                    C(0, 2) + V * com[0] * com[2],
+                    C(1, 0) + V * com[1] * com[0],
+                    C(1, 1) - V * (com[0] * com[0] + com[2] * com[2]),
+                    C(1, 2) + V * com[1] * com[2],
+                    C(2, 0) + V * com[2] * com[0],
+                    C(2, 1) + V * com[2] * com[1],
+                    C(2, 2) - V * (com[0] * com[0] + com[1] * com[1]));
+  }
+
 };
 
 /// @brief the object for collision or distance computation, contains the geometry and the transform information
@@ -312,6 +341,118 @@ protected:
 
   /// @brief pointer to user defined data specific to this object
   void *user_data;
+};
+
+
+/// @brief the object for continuous collision or distance computation, contains the geometry and the motion information
+class ContinuousCollisionObject
+{
+public:
+  ContinuousCollisionObject(const boost::shared_ptr<CollisionGeometry>& cgeom_) : cgeom(cgeom_)
+  {
+  }
+
+  ContinuousCollisionObject(const boost::shared_ptr<CollisionGeometry>& cgeom_, const boost::shared_ptr<MotionBase>& motion_) : cgeom(cgeom_), motion(motion_)
+  {
+  }
+
+  ContinuousCollisionObject() {}
+
+  ~ContinuousCollisionObject() {}
+
+  /// @brief get the type of the object
+  OBJECT_TYPE getObjectType() const
+  {
+    return cgeom->getObjectType();
+  }
+
+  /// @brief get the node type
+  NODE_TYPE getNodeType() const
+  {
+    return cgeom->getNodeType();
+  }
+
+  /// @brief get the AABB in the world space for the motion
+  inline const AABB& getAABB() const
+  {
+    return aabb;
+  }
+
+  /// @brief compute the AABB in the world space for the motion
+  inline void computeAABB()
+  {
+    IVector3 box;
+    TMatrix3 R;
+    TVector3 T;
+    motion->getTaylorModel(R, T);
+
+    Vec3f p = cgeom->aabb_local.min_;
+    box = (R * p + T).getTightBound();
+
+    p[2] = cgeom->aabb_local.max_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[1] = cgeom->aabb_local.max_[1];
+    p[2] = cgeom->aabb_local.min_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[2] = cgeom->aabb_local.max_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[0] = cgeom->aabb_local.max_[0];
+    p[1] = cgeom->aabb_local.min_[1];
+    p[2] = cgeom->aabb_local.min_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[2] = cgeom->aabb_local.max_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[1] = cgeom->aabb_local.max_[1];
+    p[2] = cgeom->aabb_local.min_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    p[2] = cgeom->aabb_local.max_[2];
+    box = bound(box, (R * p + T).getTightBound());
+
+    aabb.min_ = box.getLow();
+    aabb.max_ = box.getHigh();
+  }
+
+  /// @brief get user data in object
+  void* getUserData() const
+  {
+    return user_data;
+  }
+
+  /// @brief set user data in object
+  void setUserData(void* data)
+  {
+    user_data = data;
+  }
+
+  /// @brief get motion from the object instance
+  inline MotionBase* getMotion() const
+  {
+    return motion.get();
+  }
+
+  /// @brief get geometry from the object instance
+  inline const CollisionGeometry* getCollisionGeometry() const
+  {
+    return cgeom.get();
+  }
+
+protected:
+
+  boost::shared_ptr<CollisionGeometry> cgeom;
+
+  boost::shared_ptr<MotionBase> motion;
+
+  /// @brief AABB in the global coordinate for the motion
+  mutable AABB aabb;
+
+  /// @brief pointer to user defined data specific to this object
+  void* user_data;
 };
 
 }

@@ -1023,9 +1023,6 @@ bool initialize(MeshContinuousCollisionTraversalNode<BV>& node,
                 const BVHModel<BV>& model2, const Transform3f& tf2,
                 const CollisionRequest& request)
 {
-  if(model1.getModelType() != BVH_MODEL_TRIANGLES || model2.getModelType() != BVH_MODEL_TRIANGLES)
-    return false;
-
   node.model1 = &model1;
   node.tf1 = tf1;
   node.model2 = &model2;
@@ -1048,19 +1045,16 @@ bool initialize(MeshContinuousCollisionTraversalNode<BV>& node,
 /// @brief Initialize traversal node for conservative advancement computation between two meshes, given the current transforms
 template<typename BV>
 bool initialize(MeshConservativeAdvancementTraversalNode<BV>& node,
-                BVHModel<BV>& model1,
-                BVHModel<BV>& model2,
-                const Matrix3f& R1, const Vec3f& T1, const Matrix3f& R2, const Vec3f& T2, FCL_REAL w = 1,
+                BVHModel<BV>& model1, const Transform3f& tf1,
+                BVHModel<BV>& model2, const Transform3f& tf2,
+                FCL_REAL w = 1,
                 bool use_refit = false, bool refit_bottomup = false)
 {
-  if(model1.getModelType() != BVH_MODEL_TRIANGLES || model2.getModelType() != BVH_MODEL_TRIANGLES)
-    return false;
-
   std::vector<Vec3f> vertices_transformed1(model1.num_vertices);
   for(int i = 0; i < model1.num_vertices; ++i)
   {
     Vec3f& p = model1.vertices[i];
-    Vec3f new_v = R1 * p + T1;
+    Vec3f new_v = tf1.transform(p);
     vertices_transformed1[i] = new_v;
   }
 
@@ -1069,7 +1063,7 @@ bool initialize(MeshConservativeAdvancementTraversalNode<BV>& node,
   for(int i = 0; i < model2.num_vertices; ++i)
   {
     Vec3f& p = model2.vertices[i];
-    Vec3f new_v = R2 * p + T2;
+    Vec3f new_v = tf2.transform(p);
     vertices_transformed2[i] = new_v;
   }
 
@@ -1097,27 +1091,195 @@ bool initialize(MeshConservativeAdvancementTraversalNode<BV>& node,
 
 
 /// @brief Initialize traversal node for conservative advancement computation between two meshes, given the current transforms, specialized for RSS
-inline bool initialize(MeshConservativeAdvancementTraversalNodeRSS& node, const BVHModel<RSS>& model1, const BVHModel<RSS>& model2,
-                       const Matrix3f& R1, const Vec3f& T1, const Matrix3f& R2, const Vec3f& T2, FCL_REAL w = 1)
-{
-  if(model1.getModelType() != BVH_MODEL_TRIANGLES || model2.getModelType() != BVH_MODEL_TRIANGLES)
-    return false;
+bool initialize(MeshConservativeAdvancementTraversalNodeRSS& node,
+                const BVHModel<RSS>& model1, const Transform3f& tf1,
+                const BVHModel<RSS>& model2, const Transform3f& tf2,
+                FCL_REAL w = 1);
 
+bool initialize(MeshConservativeAdvancementTraversalNodeOBBRSS& node,
+                const BVHModel<OBBRSS>& model1, const Transform3f& tf1,
+                const BVHModel<OBBRSS>& model2, const Transform3f& tf2,
+                FCL_REAL w = 1);
+
+template<typename S1, typename S2, typename NarrowPhaseSolver>
+bool initialize(ShapeConservativeAdvancementTraversalNode<S1, S2, NarrowPhaseSolver>& node,
+                const S1& shape1, const Transform3f& tf1,
+                const S2& shape2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver)
+{ 
+  node.model1 = &shape1;
+  node.tf1 = tf1;
+  node.model2 = &shape2;
+  node.tf2 = tf2;
+  node.nsolver = nsolver;
+
+  computeBV<RSS, S1>(shape1, Transform3f(), node.model1_bv);
+  computeBV<RSS, S2>(shape2, Transform3f(), node.model2_bv);
+  
+  return true;
+}
+
+template<typename BV, typename S, typename NarrowPhaseSolver>
+bool initialize(MeshShapeConservativeAdvancementTraversalNode<BV, S, NarrowPhaseSolver>& node,
+                BVHModel<BV>& model1, const Transform3f& tf1,
+                const S& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1,
+                bool use_refit = false, bool refit_bottomup = false)
+{
+  std::vector<Vec3f> vertices_transformed(model1.num_vertices);
+  for(int i = 0; i < model1.num_vertices; ++i)
+  {
+    Vec3f& p = model1.vertices[i];
+    Vec3f new_v = tf1.transform(p);
+    vertices_transformed[i] = new_v;
+  }
+
+  model1.beginReplaceModel();
+  model1.replaceSubModel(vertices_transformed);
+  model1.endReplaceModel(use_refit, refit_bottomup);
+  
   node.model1 = &model1;
   node.model2 = &model2;
 
-  node.vertices1 = model1.vertices;
-  node.vertices2 = model2.vertices;
-
-  node.tri_indices1 = model1.tri_indices;
-  node.tri_indices2 = model2.tri_indices;
-
+  node.vertices = model1.vertices;
+  node.tri_indices = model1.tri_indices;
+  
+  node.tf1 = tf1;
+  node.tf2 = tf2;
+  
+  node.nsolver = nsolver;
   node.w = w;
 
-  relativeTransform(R1, T1, R2, T2, node.R, node.T);
+  computeBV<BV, S>(model2, Transform3f(), node.model2_bv);
 
   return true;
 }
+
+
+template<typename S, typename NarrowPhaseSolver>
+bool initialize(MeshShapeConservativeAdvancementTraversalNodeRSS<S, NarrowPhaseSolver>& node,
+                const BVHModel<RSS>& model1, const Transform3f& tf1,
+                const S& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1)
+{
+  node.model1 = &model1;
+  node.tf1 = tf1;
+  node.model2 = &model2;
+  node.tf2 = tf2;
+  node.nsolver = nsolver;
+
+  node.w = w;
+
+  computeBV<RSS, S>(model2, Transform3f(), node.model2_bv);
+
+  return true;
+}
+
+
+template<typename S, typename NarrowPhaseSolver>
+bool initialize(MeshShapeConservativeAdvancementTraversalNodeOBBRSS<S, NarrowPhaseSolver>& node,
+                const BVHModel<OBBRSS>& model1, const Transform3f& tf1,
+                const S& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1)
+{
+  node.model1 = &model1;
+  node.tf1 = tf1;
+  node.model2 = &model2;
+  node.tf2 = tf2;
+  node.nsolver = nsolver;
+
+  node.w = w;
+
+  computeBV<OBBRSS, S>(model2, Transform3f(), node.model2_bv);
+
+  return true;
+}
+
+
+template<typename S, typename BV, typename NarrowPhaseSolver>
+bool initialize(ShapeMeshConservativeAdvancementTraversalNode<S, BV, NarrowPhaseSolver>& node,
+                const S& model1, const Transform3f& tf1,
+                BVHModel<BV>& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1,
+                bool use_refit = false, bool refit_bottomup = false)
+{
+  std::vector<Vec3f> vertices_transformed(model2.num_vertices);
+  for(int i = 0; i < model2.num_vertices; ++i)
+  {
+    Vec3f& p = model2.vertices[i];
+    Vec3f new_v = tf2.transform(p);
+    vertices_transformed[i] = new_v;
+  }
+
+  model2.beginReplaceModel();
+  model2.replaceSubModel(vertices_transformed);
+  model2.endReplaceModel(use_refit, refit_bottomup);
+  
+  node.model1 = &model1;
+  node.model2 = &model2;
+
+  node.vertices = model2.vertices;
+  node.tri_indices = model2.tri_indices;
+  
+  node.tf1 = tf1;
+  node.tf2 = tf2;
+  
+  node.nsolver = nsolver;
+  node.w = w;
+
+  computeBV<BV, S>(model1, Transform3f(), node.model1_bv);
+
+  return true;
+}
+
+
+template<typename S, typename NarrowPhaseSolver>
+bool initialize(ShapeMeshConservativeAdvancementTraversalNodeRSS<S, NarrowPhaseSolver>& node,
+                const S& model1, const Transform3f& tf1,
+                const BVHModel<RSS>& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1)
+{
+  node.model1 = &model1;
+  node.tf1 = tf1;
+  node.model2 = &model2;
+  node.tf2 = tf2;
+  node.nsolver = nsolver;
+
+  node.w = w;
+
+  computeBV<RSS, S>(model1, Transform3f(), node.model1_bv);
+
+  return true;
+}
+
+
+template<typename S, typename NarrowPhaseSolver>
+bool initialize(ShapeMeshConservativeAdvancementTraversalNodeOBBRSS<S, NarrowPhaseSolver>& node,
+                const S& model1, const Transform3f& tf1,
+                const BVHModel<OBBRSS>& model2, const Transform3f& tf2,
+                const NarrowPhaseSolver* nsolver,
+                FCL_REAL w = 1)
+{
+  node.model1 = &model1;
+  node.tf1 = tf1;
+  node.model2 = &model2;
+  node.tf2 = tf2;
+  node.nsolver = nsolver;
+
+  node.w = w;
+
+  computeBV<OBBRSS, S>(model1, Transform3f(), node.model1_bv);
+
+  return true;
+}
+
+
+                
 
 }
 

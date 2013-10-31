@@ -35,12 +35,14 @@
 #ifndef FCL_CONFIG_
 #define FCL_CONFIG_
 
-#define FCL_VERSION "0.2.3"
+#define FCL_VERSION "0.2.9"
 #define FCL_MAJOR_VERSION 0
 #define FCL_MINOR_VERSION 2
-#define FCL_PATCH_VERSION 3
+#define FCL_PATCH_VERSION 9
 
 #define FCL_HAVE_SSE 0
 #define FCL_HAVE_OCTOMAP 0
+#define FCL_HAVE_FLANN 0
+#define FCL_HAVE_TINYXML 0
 
 #endif
